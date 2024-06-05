@@ -1,7 +1,44 @@
 from datetime import datetime, timedelta
-import pickle
+import sqlite3
 import re
 import bcrypt
+
+# SQLite setup with custom datetime handling
+def adapt_datetime(dt):
+    return dt.isoformat()
+
+def convert_datetime(dt_str):
+    if isinstance(dt_str, str):
+        return datetime.fromisoformat(dt_str)
+    return dt_str  # If it's not a string, return it as-is
+
+sqlite3.register_adapter(datetime, adapt_datetime)
+sqlite3.register_converter("DATETIME", convert_datetime)
+
+# Database setup
+conn = sqlite3.connect('social.db', detect_types=sqlite3.PARSE_DECLTYPES)
+c = conn.cursor()
+
+# Create tables if they do not exist
+c.execute('''
+CREATE TABLE IF NOT EXISTS users (
+    username TEXT PRIMARY KEY,
+    password_hash TEXT
+)
+''')
+
+c.execute('''
+CREATE TABLE IF NOT EXISTS posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    author TEXT,
+    text TEXT,
+    created_at DATETIME,
+    likes INTEGER DEFAULT 0,
+    dislikes INTEGER DEFAULT 0
+)
+''')
+
+conn.commit()
 
 class Content:
     def __init__(self):
@@ -13,97 +50,59 @@ class Content:
         return f"{self.author} said at {self.created_at}: {self.text}"
 
 class Post(Content):
-    entries = list()
-
     def __init__(self):
         super().__init__()
-        self.entries.append(self)
-        self.id = len(self.entries)
         self.likes = 0
         self.dislikes = 0
+        self.save_post()
+
+    def save_post(self):
+        c.execute('''
+        INSERT INTO posts (author, text, created_at, likes, dislikes)
+        VALUES (?, ?, ?, ?, ?)
+        ''', (self.author, self.text, self.created_at, self.likes, self.dislikes))
+        conn.commit()
 
     def __str__(self):
         return (f"#{self.id} {self.author} said: {self.text}. "
                 + f"Likes: {self.likes} | Dislikes: {self.dislikes}")
 
-    def __eq__(self, other):
-        if hasattr(other, "rating"):
-            return self.rating == other.rating
-        else:
-            return NotImplemented
-
-    def __lt__(self, other):
-        return self.rating < other.rating
-
-    def __le__(self, other):
-        return self.rating <= other.rating
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
-    def __gt__(self, other):
-        return self.rating > other.rating
-
-    def __ge__(self, other):
-        return self.rating >= other.rating
-
-    @staticmethod
-    def week_ago():
-        return datetime.now() - timedelta(days=7)
-
-    @classmethod
-    def show_last_week(cls):
-        for entry in cls.entries:
-            if entry.created_at > cls.week_ago():
-                print(entry)
-
     @classmethod
     def show_posts(cls):
-        for entry in sorted(cls.entries, reverse=True):
-            print(entry)
+        c.execute('SELECT * FROM posts ORDER BY id DESC')
+        posts = c.fetchall()
+        for post in posts:
+            print(f"#{post[0]} {post[1]} said: {post[2]} at {post[3]}. Likes: {post[4]} | Dislikes: {post[5]}")
 
     @classmethod
-    def find_by_id(cls):
-        post_id = input("Enter post id: ")
-        for post in cls.entries:
-            if post.id == int(post_id):
-                return post
+    def find_by_id(cls, post_id):
+        c.execute('SELECT * FROM posts WHERE id = ?', (post_id,))
+        post = c.fetchone()
+        return post
 
     @classmethod
     def like(cls):
-        post = cls.find_by_id()
-        post.likes += 1
+        post_id = input("Enter post id: ")
+        post = cls.find_by_id(post_id)
+        if post:
+            c.execute('UPDATE posts SET likes = likes + 1 WHERE id = ?', (post_id,))
+            conn.commit()
+            print("Post liked.")
+        else:
+            print("Post not found.")
 
     @classmethod
     def dislike(cls):
-        post = cls.find_by_id()
-        post.dislikes += 1
-
-    @property
-    def rating(self):
-        return self.likes - self.dislikes
-
-    @staticmethod
-    def save_posts():
-        with open("posts.pkl", "wb") as file:
-            pickle.dump(Post.entries, file)
-
-    @staticmethod
-    def load_posts():
-        try:
-            with open("posts.pkl", "rb") as file:
-                Post.entries = pickle.load(file)
-        except FileNotFoundError:
-            print("No saved posts found.")
+        post_id = input("Enter post id: ")
+        post = cls.find_by_id(post_id)
+        if post:
+            c.execute('UPDATE posts SET dislikes = dislikes + 1 WHERE id = ?', (post_id,))
+            conn.commit()
+            print("Post disliked.")
+        else:
+            print("Post not found.")
 
 class User:
-    users = {}
-
-    def __init__(self, username, password):
-        self.username = username
-        self.password_hash = self.hash_password(password)
-        self.save_user()
-
     @staticmethod
     def hash_password(password):
         return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
@@ -111,23 +110,6 @@ class User:
     @staticmethod
     def check_password(password, password_hash):
         return bcrypt.checkpw(password.encode('utf-8'), password_hash)
-
-    def save_user(self):
-        User.users[self.username] = self.password_hash
-        self.save_users_to_file()
-
-    @staticmethod
-    def save_users_to_file():
-        with open("users.pkl", "wb") as file:
-            pickle.dump(User.users, file)
-
-    @staticmethod
-    def load_users_from_file():
-        try:
-            with open("users.pkl", "rb") as file:
-                User.users = pickle.load(file)
-        except FileNotFoundError:
-            print("No saved users found.")
 
     @staticmethod
     def is_password_strong(password):
@@ -146,7 +128,8 @@ class User:
     @classmethod
     def register_user(cls):
         username = input("Enter a unique login: ")
-        if username in cls.users:
+        c.execute('SELECT * FROM users WHERE username = ?', (username,))
+        if c.fetchone():
             print("Username already exists.")
             return
 
@@ -157,7 +140,9 @@ class User:
                 continue
             confirm_password = input("Re-enter the password: ")
             if password == confirm_password:
-                cls(username, password)
+                password_hash = cls.hash_password(password)
+                c.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)', (username, password_hash))
+                conn.commit()
                 print("User registered successfully.")
                 break
             else:
@@ -166,11 +151,13 @@ class User:
     @classmethod
     def authenticate_user(cls):
         username = input("Enter your login: ")
-        if username not in cls.users:
+        c.execute('SELECT * FROM users WHERE username = ?', (username,))
+        user = c.fetchone()
+        if not user:
             print("Username does not exist.")
             return False
         password = input("Enter your password: ")
-        if cls.check_password(password, cls.users[username]):
+        if cls.check_password(password, user[1]):
             print("Authentication successful.")
             return True
         else:
@@ -186,9 +173,6 @@ class Comment(Content):
         return f"{self.author} commented on {self.post_id}: {self.text}"
 
 if __name__ == "__main__":
-    Post.load_posts()
-    User.load_users_from_file()
-
     while True:
         print("Welcome to the new social")
         message = ("""
@@ -197,10 +181,8 @@ if __name__ == "__main__":
             2. See all posts
             3. Like post
             4. Dislike post
-            5. Save posts
-            6. Load posts
-            7. Register user
-            8. Login
+            5. Register user
+            6. Login
             0. Exit 
 
             Your Choice: """)
@@ -214,14 +196,12 @@ if __name__ == "__main__":
         elif choice == "4":
             Post.dislike()
         elif choice == "5":
-            Post.save_posts()
-        elif choice == "6":
-            Post.load_posts()
-        elif choice == "7":
             User.register_user()
-        elif choice == "8":
+        elif choice == "6":
             User.authenticate_user()
         elif choice == "0":
             break
         else:
             print("Wrong choice")
+
+conn.close()
