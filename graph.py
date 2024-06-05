@@ -19,10 +19,18 @@ class Graph:
             print(f"{vertex}: {neighbors}")
 
     def find_loops(self):
-        pass
+        loops = []
+        for vertex, neighbors in self.vertexes.items():
+            if vertex in neighbors:
+                loops.append(vertex)
+        return loops
 
     def find_isolated(self):
-        pass
+        isolated = []
+        for vertex, neighbors in self.vertexes.items():
+            if len(neighbors) == 0:
+                isolated.append(vertex)
+        return isolated
 
 if __name__ == "__main__":
     graph = Graph()
@@ -38,7 +46,11 @@ if __name__ == "__main__":
     graph.add_edge("e", "d")
     graph.print_vertexes()
 
+    print("Loops:", graph.find_loops())
+    print("Isolated vertices:", graph.find_isolated())
+
 """
+Expected Output:
 {
     "a": {"a", "b"},
     "b": {"a", "d", "e"},
@@ -46,4 +58,6 @@ if __name__ == "__main__":
     "d": {"b", "e"},
     "e": {"b", "d"},
 }
+Loops: ['a']
+Isolated vertices: ['c']
 """
