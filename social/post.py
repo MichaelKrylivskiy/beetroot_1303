@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta
 import pickle
-
+import re
+import bcrypt
 
 class Content:
-
     def __init__(self):
         self.author = input("Enter nickname: ")
         self.text = input("Write your post: ")
@@ -11,7 +11,6 @@ class Content:
 
     def __str__(self):
         return f"{self.author} said at {self.created_at}: {self.text}"
-
 
 class Post(Content):
     entries = list()
@@ -97,9 +96,88 @@ class Post(Content):
         except FileNotFoundError:
             print("No saved posts found.")
 
+class User:
+    users = {}
+
+    def __init__(self, username, password):
+        self.username = username
+        self.password_hash = self.hash_password(password)
+        self.save_user()
+
+    @staticmethod
+    def hash_password(password):
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+
+    @staticmethod
+    def check_password(password, password_hash):
+        return bcrypt.checkpw(password.encode('utf-8'), password_hash)
+
+    def save_user(self):
+        User.users[self.username] = self.password_hash
+        self.save_users_to_file()
+
+    @staticmethod
+    def save_users_to_file():
+        with open("users.pkl", "wb") as file:
+            pickle.dump(User.users, file)
+
+    @staticmethod
+    def load_users_from_file():
+        try:
+            with open("users.pkl", "rb") as file:
+                User.users = pickle.load(file)
+        except FileNotFoundError:
+            print("No saved users found.")
+
+    @staticmethod
+    def is_password_strong(password):
+        if len(password) < 8:
+            return False
+        if not re.search(r"[a-z]", password):
+            return False
+        if not re.search(r"[A-Z]", password):
+            return False
+        if not re.search(r"\d", password):
+            return False
+        if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+            return False
+        return True
+
+    @classmethod
+    def register_user(cls):
+        username = input("Enter a unique login: ")
+        if username in cls.users:
+            print("Username already exists.")
+            return
+
+        while True:
+            password = input("Enter a strong password: ")
+            if not cls.is_password_strong(password):
+                print("Password is not strong enough.")
+                continue
+            confirm_password = input("Re-enter the password: ")
+            if password == confirm_password:
+                cls(username, password)
+                print("User registered successfully.")
+                break
+            else:
+                print("Passwords do not match.")
+
+    @classmethod
+    def authenticate_user(cls):
+        username = input("Enter your login: ")
+        if username not in cls.users:
+            print("Username does not exist.")
+            return False
+        password = input("Enter your password: ")
+        if cls.check_password(password, cls.users[username]):
+            print("Authentication successful.")
+            return True
+        else:
+            print("Incorrect password.")
+            return False
 
 class Comment(Content):
-
     def __init__(self, post_id):
         super().__init__()
         self.post_id = post_id
@@ -107,9 +185,9 @@ class Comment(Content):
     def __str__(self):
         return f"{self.author} commented on {self.post_id}: {self.text}"
 
-
 if __name__ == "__main__":
     Post.load_posts()
+    User.load_users_from_file()
 
     while True:
         print("Welcome to the new social")
@@ -121,6 +199,8 @@ if __name__ == "__main__":
             4. Dislike post
             5. Save posts
             6. Load posts
+            7. Register user
+            8. Login
             0. Exit 
 
             Your Choice: """)
@@ -137,6 +217,10 @@ if __name__ == "__main__":
             Post.save_posts()
         elif choice == "6":
             Post.load_posts()
+        elif choice == "7":
+            User.register_user()
+        elif choice == "8":
+            User.authenticate_user()
         elif choice == "0":
             break
         else:
