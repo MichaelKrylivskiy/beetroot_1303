@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 import sqlite3
 import re
 import bcrypt
@@ -50,29 +50,53 @@ class Content:
         return f"{self.author} said at {self.created_at}: {self.text}"
 
 class Post(Content):
+    entries = []
+
     def __init__(self):
         super().__init__()
         self.likes = 0
         self.dislikes = 0
         self.save_post()
+        Post.entries.append(self)
+
+    @property
+    def rating(self):
+        return self.likes - self.dislikes
 
     def save_post(self):
         c.execute('''
         INSERT INTO posts (author, text, created_at, likes, dislikes)
         VALUES (?, ?, ?, ?, ?)
         ''', (self.author, self.text, self.created_at, self.likes, self.dislikes))
+        self.id = c.lastrowid
         conn.commit()
 
     def __str__(self):
         return (f"#{self.id} {self.author} said: {self.text}. "
                 + f"Likes: {self.likes} | Dislikes: {self.dislikes}")
 
+    def __lt__(self, other):
+        return self.rating < other.rating
+
+    def __le__(self, other):
+        return self.rating <= other.rating
+
+    def __eq__(self, other):
+        return self.rating == other.rating
+
+    def __ne__(self, other):
+        return self.rating != other.rating
+
+    def __gt__(self, other):
+        return self.rating > other.rating
+
+    def __ge__(self, other):
+        return self.rating >= other.rating
+
     @classmethod
     def show_posts(cls):
-        c.execute('SELECT * FROM posts ORDER BY id DESC')
-        posts = c.fetchall()
-        for post in posts:
-            print(f"#{post[0]} {post[1]} said: {post[2]} at {post[3]}. Likes: {post[4]} | Dislikes: {post[5]}")
+        for entry in sorted(cls.entries, reverse=True):
+            print(entry)
 
     @classmethod
     def find_by_id(cls, post_id):
@@ -82,22 +106,28 @@ class Post(Content):
 
     @classmethod
     def like(cls):
-        post_id = input("Enter post id: ")
+        post_id = int(input("Enter post id: "))
         post = cls.find_by_id(post_id)
         if post:
             c.execute('UPDATE posts SET likes = likes + 1 WHERE id = ?', (post_id,))
             conn.commit()
+            for entry in cls.entries:
+                if entry.id == post_id:
+                    entry.likes += 1
             print("Post liked.")
         else:
             print("Post not found.")
 
     @classmethod
     def dislike(cls):
-        post_id = input("Enter post id: ")
+        post_id = int(input("Enter post id: "))
         post = cls.find_by_id(post_id)
         if post:
             c.execute('UPDATE posts SET dislikes = dislikes + 1 WHERE id = ?', (post_id,))
             conn.commit()
+            for entry in cls.entries:
+                if entry.id == post_id:
+                    entry.dislikes += 1
             print("Post disliked.")
         else:
             print("Post not found.")
