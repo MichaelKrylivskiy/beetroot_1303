@@ -27,22 +27,32 @@ CREATE TABLE IF NOT EXISTS users (
 )
 ''')
 
-c.execute('''
-CREATE TABLE IF NOT EXISTS posts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    author TEXT,
-    text TEXT,
-    created_at DATETIME,
-    likes INTEGER DEFAULT 0,
-    dislikes INTEGER DEFAULT 0
-)
-''')
+# Check if the user_id column exists, if not add it
+c.execute("PRAGMA table_info(posts)")
+columns = [column[1] for column in c.fetchall()]
+if 'user_id' not in columns:
+    c.execute('ALTER TABLE posts ADD COLUMN user_id TEXT')
+else:
+    # Drop and recreate the posts table with the new schema
+    c.execute('DROP TABLE IF EXISTS posts')
+    c.execute('''
+    CREATE TABLE posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        author TEXT,
+        text TEXT,
+        created_at DATETIME,
+        likes INTEGER DEFAULT 0,
+        dislikes INTEGER DEFAULT 0,
+        user_id TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(username)
+    )
+    ''')
 
 conn.commit()
 
 class Content:
-    def __init__(self):
-        self.author = input("Enter nickname: ")
+    def __init__(self, author):
+        self.author = author
         self.text = input("Write your post: ")
         self.created_at = datetime.now()
 
@@ -52,8 +62,8 @@ class Content:
 class Post(Content):
     entries = []
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, author):
+        super().__init__(author)
         self.likes = 0
         self.dislikes = 0
         self.save_post()
@@ -65,9 +75,9 @@ class Post(Content):
 
     def save_post(self):
         c.execute('''
-        INSERT INTO posts (author, text, created_at, likes, dislikes)
-        VALUES (?, ?, ?, ?, ?)
-        ''', (self.author, self.text, self.created_at, self.likes, self.dislikes))
+        INSERT INTO posts (author, text, created_at, likes, dislikes, user_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ''', (self.author, self.text, self.created_at, self.likes, self.dislikes, self.author))
         self.id = c.lastrowid
         conn.commit()
 
@@ -189,20 +199,22 @@ class User:
         password = input("Enter your password: ")
         if cls.check_password(password, user[1]):
             print("Authentication successful.")
-            return True
+            return username  # Return the username if authentication is successful
         else:
             print("Incorrect password.")
             return False
 
 class Comment(Content):
-    def __init__(self, post_id):
-        super().__init__()
+    def __init__(self, author, post_id):
+        super().__init__(author)
         self.post_id = post_id
 
     def __str__(self):
         return f"{self.author} commented on {self.post_id}: {self.text}"
 
 if __name__ == "__main__":
+    logged_in_user = None
+
     while True:
         print("Welcome to the new social")
         message = ("""
@@ -218,7 +230,10 @@ if __name__ == "__main__":
             Your Choice: """)
         choice = input(message)
         if choice == "1":
-            Post()
+            if logged_in_user:
+                Post(logged_in_user)
+            else:
+                print("You need to log in to add a post.")
         elif choice == "2":
             Post.show_posts()
         elif choice == "3":
@@ -228,7 +243,7 @@ if __name__ == "__main__":
         elif choice == "5":
             User.register_user()
         elif choice == "6":
-            User.authenticate_user()
+            logged_in_user = User.authenticate_user()
         elif choice == "0":
             break
         else:
